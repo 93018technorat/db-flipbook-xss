@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>corporates.db.com Flipbook DOM-XSS</title>
+<style>
+:root{--bg:#0b1020;--fg:#e7ecf5;--mut:#8aa0c6;--ac:#ff4d4d;--ok:#35d07f;--card:#141b30;--bd:#ffffff22}
+@media(prefers-color-scheme:light){:root{--bg:#f6f8fc;--fg:#10203a;--mut:#4a5e82;--card:#fff;--bd:#1020301a}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.6 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg)}
+.wrap{max-width:860px;margin:0 auto;padding:28px 16px}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--mut);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px 18px;margin:14px 0}
+code,pre{font-family:ui-monospace,Menlo,Consolas,monospace}
+code{background:#8884;padding:1px 5px;border-radius:4px;font-size:.92em}
+pre{background:#00000026;border:1px solid var(--bd);border-radius:8px;padding:12px;overflow:auto;font-size:13px}
+.btn{display:inline-block;background:var(--ac);color:#fff;text-decoration:none;font-weight:600;padding:11px 20px;border-radius:9px;font-size:15px}
+.btn:active{transform:translateY(1px)}
+ul{margin:8px 0;padding-left:20px}li{margin:2px 0}
+.k{color:var(--ac);font-weight:600}.sev{display:inline-block;border:1px solid var(--ac);color:var(--ac);border-radius:6px;padding:1px 8px;font-size:12px;font-weight:600}
+.steps li{margin:6px 0}
+.foot{color:var(--mut);font-size:13px;margin-top:22px}
+</style></head><body><div class=wrap>
+
+<h1>Cross-origin postMessage DOM-XSS &mdash; <code>corporates.db.com</code></h1>
+<p class=sub><span class=sev>DOM XSS</span> &nbsp; Deutsche Bank &middot; <code>*.db.com</code> &middot; Livebook flipbook viewer</p>
+
+<div class=card>
+<b>What this is.</b> The Livebook flipbook viewer hosted at <code>corporates.db.com/static/flipbook/&lt;book&gt;/</code>
+registers a <code>window.onmessage</code> handler <b>with no <code>event.origin</code> / <code>event.source</code> check</b>
+when loaded with <code>?iframe=1</code>, and feeds the received message straight into
+<code>$.parseXML &rarr; buildSitemap &rarr; $(node).attr("title") &rarr; jQuery .append('&lt;span&gt;'+title)</code>
+&mdash; an unescaped HTML sink. The page ships <b>no CSP</b> and no framing restriction on that path, so any website can
+frame it and post a crafted <code>book.xml</code> whose <code>&lt;node title&gt;</code> executes arbitrary JavaScript in
+the <code>corporates.db.com</code> origin.
+</div>
+
+<div class=card style="text-align:center">
+<p style="margin:0 0 12px">Click to run the live PoC (opens in a new tab). An <b>alert("corporates.db.com")</b> fires &mdash;
+arbitrary JS in the bank's origin, delivered cross-origin from this page.</p>
+<a class=btn href="run.html" target="_blank" rel="noopener">&#9654;&nbsp; Run live PoC</a>
+</div>
+
+<div class=card>
+<b>How it works (what <code>run.html</code> does)</b>
+<ol class=steps>
+<li>Frames <code>https://corporates.db.com/static/flipbook/Deutsche-Bank-China-Compass-2024/index.html?iframe=1</code>.</li>
+<li>The flipbook posts <code>"init"</code> to its parent (this page) and starts listening for the book XML &mdash; <span class=k>with no origin check</span>.</li>
+<li>This page replies with a crafted <code>book.xml</code> containing<br>
+<code>&lt;node title="&amp;lt;img src=x onerror=alert(document.domain)&amp;gt;"/&gt;</code>.</li>
+<li>The viewer renders the title via <code>.append()</code> &rarr; the <code>&lt;img onerror&gt;</code> executes in the
+<code>corporates.db.com</code> origin &rarr; <b>alert popup</b> (+ a <code>PMXSS:</code> beacon back to this page as programmatic proof).</li>
+</ol>
+</div>
+
+<div class=card>
+<b>Verify the vulnerable code (no browser needed)</b>
+<pre>curl -s https://corporates.db.com/static/flipbook/Deutsche-Bank-China-Compass-2024/dist/js/all.js \
+ | grep -o 'void 0!==livebook.query.iframe?(window.onmessage=function(t){e(t.data)}[^)]*)'
+# -&gt; window.onmessage=function(t){e(t.data)},window.parent.postMessage("init","*")   (no origin check)
+
+curl -sI 'https://corporates.db.com/static/flipbook/Deutsche-Bank-China-Compass-2024/index.html?iframe=1'
+# -&gt; HTTP/2 200, no content-security-policy, no x-frame-options   (framable)</pre>
+</div>
+
+<div class=card>
+<b>Affected</b> &mdash; all flipbooks under <code>corporates.db.com/static/flipbook/</code> ship the identical vulnerable <code>dist/js/all.js</code>:
+<ul>
+<li>Deutsche-Bank-China-Compass-2024 &nbsp;<span class=k>(browser-confirmed, framing)</span></li>
+<li>DB-Namaste-India-Edition-2023 &nbsp;<span class=k>(confirmed, window.open variant)</span></li>
+<li>DB-Namaste-India-Edition-2021-Japanese</li>
+<li>DB-Salam-Indonesia-2022</li>
+<li>Deutsche-Bank-Marhaba-Saudi-Arabia-2024</li>
+<li>Deutsche-Bank-Navigating-ASEAN-6-Capital-Markets-2024</li>
+<li>A-guide-to-Digital-Trade-finance</li>
+<li>Regulatory-outlook-in-securities-services-H1-2024</li>
+</ul>
+</div>
+
+<p class=foot>Authorized security testing &middot; payload is a harmless <code>alert(document.domain)</code> &middot;
+no data accessed, no third party affected. For bug-bounty report use only.</p>
+
+</div></body></html>
